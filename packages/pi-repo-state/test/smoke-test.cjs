@@ -13,10 +13,10 @@ const REPO = path.resolve(ROOT, "..", "..");
 
 function runGit(args) {
   try {
-    const out = execFileSync("git", ["-C", REPO, ...args], { encoding: "utf-8", timeout: 8000 });
-    return { ok: true, out, err: "" };
+    const stdout = execFileSync("git", ["-C", REPO, ...args], { encoding: "utf-8", timeout: 8000 });
+    return { stdout, stderr: "", code: 0 };
   } catch (e) {
-    return { ok: false, out: e.stdout || "", err: e.stderr || "" };
+    return { stdout: e.stdout || "", stderr: e.stderr || "", code: e.status ?? -1 };
   }
 }
 
@@ -65,16 +65,29 @@ async function main() {
     check("output has dirty line", /dirty:/.test(text));
     check("output has diff line", /diff:/.test(text));
     check("output has recent commits", /recent:/.test(text));
+    // XY-correctness: dirty line must parse and staged/untracked counts must be internally consistent
+    const dm = text.match(/dirty: (\d+) modified, (\d+) staged, (\d+) untracked, (\d+) deleted/);
+    if (dm) {
+      const [, modified, staged, untracked, deleted] = dm.map(Number);
+      // sanity: counts must not exceed total status lines; no negative
+      check("dirty counts parse & non-negative", [modified, staged, untracked, deleted].every((n) => Number.isFinite(n) && n >= 0), `${modified}M/${staged}S/${untracked}U/${deleted}D`);
+      // if any untracked exist, dirty line must not claim zero untracked
+      const st = runGit(["status", "--porcelain=v1"]);
+      const realUntracked = (st.stdout || "").split("\n").filter((l) => l.startsWith("??")).length;
+      check("untracked count matches git", untracked === realUntracked, `tool=${untracked} git=${realUntracked}`);
+    } else {
+      check("dirty line parses", false, text.slice(0, 80));
+    }
+
+    // cache: second call within 3s (same cwd) returns cached flag — check BEFORE the non-repo call which overwrites the cache
+    const res3 = await tool.execute("t", {}, undefined, undefined, { cwd: REPO });
+    const det3 = res3.details || {};
+    check("cached second call", det3.cached === true, "cached=" + det3.cached);
 
     // non-repo dir
     const res2 = await tool.execute("t", {}, undefined, undefined, { cwd: path.parse(ROOT).root });
     const text2 = (res2.content || []).map((c) => c.text || "").join("\n");
     check("non-repo returns clear verdict", /not a git repository/.test(text2), text2.slice(0, 60));
-
-    // cache: second call within 3s returns cached flag
-    const res3 = await tool.execute("t", {}, undefined, undefined, { cwd: REPO });
-    const det3 = res3.details || {};
-    check("cached second call", det3.cached === true, "cached=" + det3.cached);
   }
 
   console.log(`\n=== ${failures === 0 ? "ALL PASS" : failures + " FAILURES"} ===`);

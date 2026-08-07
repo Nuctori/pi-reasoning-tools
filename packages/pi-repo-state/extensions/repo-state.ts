@@ -18,7 +18,7 @@
  */
 import { Type } from "typebox";
 
-interface ExecResult { stdout: string; stderr: string; code: number; }
+interface ExecResult { stdout: string; stderr: string; code: number; killed?: boolean; }
 
 interface MinimalPi {
   registerTool(def: any): void;
@@ -32,11 +32,14 @@ const GIT_TIMEOUT = 4000;
 interface RepoState {
   at: number;
   isRepo: boolean;
+  gitMissing: boolean;
   cwd: string;
   branch: string | null;
+  detached: boolean;
   upstream: string | null;
   ahead: number | null;
   behind: number | null;
+  aheadUnknown: boolean;
   dirty: { modified: number; staged: number; untracked: number; deleted: number; conflicts: number };
   diff: { insertions: number; deletions: number; files: number; topFiles: string[] };
   recent: { sha: string; subject: string }[];
@@ -47,10 +50,11 @@ interface RepoState {
 export default function repoStateExtension(pi: MinimalPi) {
   let cached: RepoState | null = null;
 
-  async function git(ctx: Ctx, args: string[]): Promise<{ ok: boolean; out: string; err: string }> {
+  async function git(ctx: Ctx, args: string[]): Promise<{ ok: boolean; out: string; err: string; killed?: boolean }> {
     try {
       const r = await pi.exec("git", ["-C", ctx.cwd, ...args], { timeout: GIT_TIMEOUT });
-      return { ok: r.code === 0, out: r.stdout || "", err: r.stderr || "" };
+      // pi.exec can return {code:0, killed:true} on timeout — treat killed as failure to avoid silent empty snapshots
+      return { ok: r.code === 0 && !r.killed, out: r.stdout || "", err: r.stderr || "", killed: r.killed };
     } catch (e) {
       return { ok: false, out: "", err: String((e as Error)?.message || e) };
     }
@@ -62,7 +66,7 @@ export default function repoStateExtension(pi: MinimalPi) {
       git(ctx, ["rev-parse", "--abbrev-ref", "HEAD"]),
       git(ctx, ["status", "--porcelain=v1"]),
       git(ctx, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]),
-      git(ctx, ["diff", "--numstat"]),
+      git(ctx, ["-c", "core.quotePath=false", "diff", "--numstat"]),
       git(ctx, ["log", "--oneline", "-3"]),
       git(ctx, ["remote", "get-url", "origin"]),
       git(ctx, ["worktree", "list", "--porcelain"]),
@@ -70,9 +74,11 @@ export default function repoStateExtension(pi: MinimalPi) {
 
     const isRepo = workTree.ok && workTree.out.trim() === "true";
     if (!isRepo) {
+      // distinguish "not a repo" from "git unavailable / other failure"
+      const gitMissing = !workTree.ok && /ENOENT|not recognized|No such file/i.test(workTree.err);
       return {
-        at: Date.now(), isRepo: false, cwd: ctx.cwd,
-        branch: null, upstream: null, ahead: null, behind: null,
+        at: Date.now(), isRepo: false, gitMissing, cwd: ctx.cwd,
+        branch: null, detached: false, upstream: null, ahead: null, behind: null, aheadUnknown: false,
         dirty: { modified: 0, staged: 0, untracked: 0, deleted: 0, conflicts: 0 },
         diff: { insertions: 0, deletions: 0, files: 0, topFiles: [] },
         recent: [], remote: null, worktrees: { count: 0, primary: null },
@@ -80,7 +86,7 @@ export default function repoStateExtension(pi: MinimalPi) {
     }
 
     // ahead/behind vs upstream
-    let ahead: number | null = null, behind: number | null = null;
+    let ahead: number | null = null, behind: number | null = null, aheadUnknown = false;
     const upstreamName = upstream.ok ? upstream.out.trim() : null;
     if (upstreamName) {
       const ab = await git(ctx, ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"]);
@@ -88,21 +94,31 @@ export default function repoStateExtension(pi: MinimalPi) {
         const [l, r] = ab.out.trim().split(/\s+/);
         ahead = parseInt(l || "0", 10);
         behind = parseInt(r || "0", 10);
+      } else {
+        aheadUnknown = true;
       }
     }
 
-    // dirty counts from porcelain (XY path)
-    let modified = 0, staged = 0, untracked = 0, deleted = 0;
+    // dirty counts from porcelain v1 (XY status: X=index/staged, Y=worktree/unstaged)
+    let modified = 0, staged = 0, untracked = 0, deleted = 0, conflicts = 0;
     for (const line of status.out.split("\n")) {
       if (!line.trim()) continue;
-      const xy = line.slice(0, 2);
-      if (xy.startsWith("??")) { untracked++; continue; }
-      if (xy.includes("D")) deleted++;
-      if (/[MA]/.test(xy[1])) staged++;
-      else if (/[MA]/.test(xy[0])) modified++;
-      else modified++;
+      const x = line[0], y = line[1];
+      const xy = x + y;
+      if (xy === "??") { untracked++; continue; }
+      // unmerged: X or Y is U, or both-sides same conflict letters (AA/DD)
+      if (x === "U" || y === "U" || (x === y && (x === "A" || x === "D"))) { conflicts++; continue; }
+      // staged (index) changes
+      if (x !== " " && x !== "?") {
+        if (x === "D") deleted++;
+        else if ("MARC".includes(x)) staged++;
+      }
+      // unstaged (worktree) changes
+      if (y !== " " && y !== "?") {
+        if (y === "D") deleted++;
+        else if ("MARC".includes(y)) modified++;
+      }
     }
-    const conflicts = status.out.split("\n").filter((l) => l.slice(0, 2).startsWith("UU")).length;
 
     // diff stats (uncommitted): numstat lines "ins\tdel\tpath"
     let insertions = 0, deletions = 0;
@@ -127,20 +143,27 @@ export default function repoStateExtension(pi: MinimalPi) {
 
     // worktrees
     let wtCount = 1, wtPrimary: string | null = null;
-    const wtLines = wtList.out.split("\n");
-    if (wtLines.length) {
+    if (wtList.ok && wtList.out.trim()) {
       const worktrees = wtList.out.trim().split(/\n\n+/).filter(Boolean);
       wtCount = worktrees.length;
-      const primary = worktrees.find((w) => w.includes("bare"));
       const normal = worktrees.filter((w) => !w.includes("bare"));
       wtPrimary = normal[0]?.match(/^worktree (.+)$/m)?.[1] ?? null;
-      void primary;
+    }
+
+    // branch: unborn HEAD fallback to symbolic-ref; detached HEAD annotation
+    const branchRaw = branch.ok ? branch.out.trim() : null;
+    let branchName: string | null = branchRaw && branchRaw !== "HEAD" ? branchRaw : null;
+    let detached = false;
+    if (!branchName) {
+      const sr = await git(ctx, ["symbolic-ref", "--short", "HEAD"]);
+      if (sr.ok) branchName = sr.out.trim();
+      else if (branchRaw === "HEAD") { branchName = "HEAD (detached)"; detached = true; }
+      else if (branchRaw) branchName = branchRaw;
     }
 
     return {
-      at: Date.now(), isRepo: true, cwd: ctx.cwd,
-      branch: branch.ok ? branch.out.trim() : null,
-      upstream: upstreamName, ahead, behind,
+      at: Date.now(), isRepo: true, gitMissing: false, cwd: ctx.cwd,
+      branch: branchName, detached, upstream: upstreamName, ahead, behind, aheadUnknown,
       dirty: { modified, staged, untracked, deleted, conflicts },
       diff: { insertions, deletions, files: fileStats.length, topFiles },
       recent, remote: remoteName, worktrees: { count: wtCount, primary: wtPrimary },
@@ -149,14 +172,17 @@ export default function repoStateExtension(pi: MinimalPi) {
 
   function format(s: RepoState, depth: "quick" | "full"): string {
     if (!s.isRepo) {
+      if (s.gitMissing) {
+        return `repo_state: git is not available in PATH (cwd: ${s.cwd}). Install git or check PATH before using repo_state.`;
+      }
       return `repo_state: not a git repository (cwd: ${s.cwd}). Use scope=files-based workflows or plain file tools.`;
     }
     const lines: string[] = [];
     const branchPart = s.upstream
-      ? `ahead ${s.ahead ?? 0} / behind ${s.behind ?? 0} (upstream ${s.upstream})`
+      ? `ahead ${s.aheadUnknown ? "?" : (s.ahead ?? 0)} / behind ${s.aheadUnknown ? "?" : (s.behind ?? 0)} (upstream ${s.upstream})`
       : "no upstream";
     lines.push(`repo: ${s.cwd}`);
-    lines.push(`branch: ${s.branch ?? "?"} — ${branchPart}`);
+    lines.push(`branch: ${s.branch ?? "?"}${s.detached ? " [detached]" : ""} — ${branchPart}`);
     const d = s.dirty;
     lines.push(
       `dirty: ${d.modified} modified, ${d.staged} staged, ${d.untracked} untracked, ${d.deleted} deleted${d.conflicts ? `, ${d.conflicts} CONFLICTS` : ""}`
@@ -188,7 +214,7 @@ export default function repoStateExtension(pi: MinimalPi) {
     name: "repo_state",
     label: "Repo State",
     description:
-      "One-call snapshot of the current git repository: branch, ahead/behind, dirty file counts (modified/staged/untracked/deleted/conflicts), diff +/- statistics (file-level, not full text), recent commits, remote, worktree info. Directly spawns git — no shell wrapping. Use when you need repository state before planning, editing, or verifying; prefer this over a chain of git status/diff/log shell commands. Verdict-first: 'not a git repository' when applicable. Cached ~3s; force=true to bypass.",
+      "One-call snapshot of the current git repository: branch, ahead/behind, dirty file counts (modified/staged/untracked/deleted/conflicts), diff +/- statistics (file-level, not full text), recent commits, remote, worktree info. Directly spawns git — no shell wrapping. Use when you need repository state before planning, editing, or verifying; prefer this over a chain of git status/diff/log shell commands. Verdict-first: 'not a git repository' / 'git not available' when applicable. Cached ~3s; force=true to bypass.",
     promptSnippet: "Return a one-call git repository snapshot (branch, dirty counts, diff stats, conflicts)",
     promptGuidelines: [
       "Use repo_state when you need repository state (branch/dirty/conflicts/diff overview) instead of running git status/diff/log via shell — one call replaces a whole command chain.",
