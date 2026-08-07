@@ -1,0 +1,18 @@
+{
+  "name": "pi-repo-state",
+  "version": "0.1.0",
+  "description": "Lightweight on-demand git repository snapshot for pi agents: one call returns branch/ahead-behind/dirty counts/diff stats/conflicts/recent commits, directly spawning git (no shell wrapping, no per-prompt injection, no TUI — avoids the stale-context crash and cache-prefix breakage found in pi-git-context).",
+  "keywords": ["pi-package", "git", "repo-state", "repository", "snapshot", "efficiency"],
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./extensions"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "jiti": "^2.7.0",
+    "typebox": "^1.3.7"
+  }
+}

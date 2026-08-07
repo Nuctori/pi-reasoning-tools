@@ -1,0 +1,18 @@
+{
+  "name": "pi-env-probe",
+  "version": "0.1.0",
+  "description": "Environment capability matrix for pi agents: one call (plus session-start injection) reports binaries, git identity and shell allowlist state with known pitfalls, so the model never blind-probes the environment. Evidence-driven: 352/389 ctx_grep failures in a 115-session corpus were 'rg: command not found' PATH drift.",
+  "keywords": ["pi-package", "env-probe", "environment", "capability-matrix", "trial-and-error"],
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./extensions"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "jiti": "^2.7.0",
+    "typebox": "^1.3.7"
+  }
+}

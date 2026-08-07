@@ -1,0 +1,16 @@
+{
+  "name": "pi-code-intel-guide",
+  "version": "0.1.0",
+  "description": "Guide pi agents to the dedicated code-intelligence toolchain: injects a retrieval protocol (symbol_search → ctx_compose → module_report/read_symbol → ctx_grep) and redirects shell recursive code-search (rg / grep -r / find -name / Select-String -Recurse). Evidence-driven: 10,640 shell search-read calls (8.8M tokens) while ctx_compose was used 4× in a 115-session corpus.",
+  "keywords": ["pi-package", "code-intel", "retrieval", "ctx-compose", "reasoning"],
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./extensions"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "jiti": "^2.7.0"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "pi-agent-tools-monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Monorepo of one-tool-per-package pi extensions. Each package publishes, versions, and maintains independently. See ROADMAP.md for the tool-group plan and per-package lifecycles.",
+  "workspaces": ["packages/*"],
+  "license": "MIT"
+}
