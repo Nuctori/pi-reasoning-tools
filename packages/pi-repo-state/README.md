@@ -58,11 +58,19 @@ npm install && node test/smoke-test.cjs && node test/smoke-inject.cjs
 
 ## Optional: minimal turn-0 injection
 
-`extensions/git-mini-inject.ts` (same package) injects a **one-line** git snapshot
-(`[git] branch (sha) · dirty 5m/0s/3u/0d · ahead 1/behind 0`) at **turn 0 only**
-(the first LLM call of each user request), appended at the end of the message
-array. Turns > 0 strip it; use `repo_state` for fresh detail mid-turn. Opt out
-with `PI_REPO_STATE_INJECT=off`.
+`extensions/git-mini-inject.ts` (same package) injects a **high-density project
+version/iteration snapshot** at **turn 0 only** (the first LLM call of each user
+request), appended at the end of the message array:
+
+```
+[iter] remote github.com/example/repo | default master (05a2094) ahead0/b0 | branch feature (b5ca078) +2 from master | dirty 0m/0s/0u/0d
+```
+
+Covers: remote · default branch (sha + ahead/behind vs origin) · current branch
+(+N commits from default = iteration distance) · version (package.json / git
+describe) · dirty counts · worktree topology (linked? primary? total). Degrades
+gracefully without a remote (branch/ver/dirty only). Turns > 0 strip it; use
+`repo_state` for fresh detail mid-turn. Opt out with `PI_REPO_STATE_INJECT=off`.
 
 Cache trade-off (measured): across requests the injection adds only a ~100-token
 tail suffix (prefix cache preserved); within a request, the turn0→turn1 boundary
