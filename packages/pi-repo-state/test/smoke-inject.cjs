@@ -128,6 +128,28 @@ async function main() {
     check("full: +N from default", /\+2 from master/.test(fullLine), "+2 from master");
     check("full: single line high density", !fullLine.includes("\n") && fullLine.length < 300, "len=" + fullLine.length);
     fs.rmSync(tdir, { recursive: true, force: true });
+
+    // primary worktree state (multi-worktree repo)
+    const wdir = fs.mkdtempSync(path.join(os.tmpdir(), "rs-inject-wt-"));
+    gitIn(wdir, "init", "-q");
+    gitIn(wdir, "config", "user.name", "t"); gitIn(wdir, "config", "user.email", "t@t");
+    fs.writeFileSync(path.join(wdir, "a.txt"), "base\n");
+    gitIn(wdir, "add", "a.txt"); gitIn(wdir, "commit", "-qm", "base");
+    const wt2 = path.join(os.tmpdir(), "rs-inject-wt2-" + Date.now());
+    gitIn(wdir, "worktree", "add", "-q", wt2, "-b", "feature");
+    // make primary dirty so its state is observable
+    fs.writeFileSync(path.join(wdir, "a.txt"), "base\nprimary-dirty\n");
+
+    sessionStart?.({}, {});
+    turnStart?.({ turnIndex: 0 }, {});
+    const rWt = await ctxHandler({ messages: [{ role: "system", content: "s" }] }, { cwd: wt2 });
+    const wtLine = (rWt.messages.find((m) => m.role === "custom" && m.customType === "repo-state-mini") || {}).content || "";
+    console.log("  wt-inject:", wtLine);
+    check("wt: current linked", /wt linked/.test(wtLine), wtLine.slice(0, 80));
+    check("wt: primary state present", /primary .+ dirty \d+m\//.test(wtLine), "primary dirty");
+    check("wt: 2 total", /\(2 total\)/.test(wtLine));
+    fs.rmSync(wt2, { recursive: true, force: true });
+    fs.rmSync(wdir, { recursive: true, force: true });
   }
 
   console.log(`\n=== ${failures === 0 ? "ALL PASS" : failures + " FAILURES"} ===`);

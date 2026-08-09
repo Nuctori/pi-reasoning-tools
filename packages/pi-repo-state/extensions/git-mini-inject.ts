@@ -34,31 +34,57 @@ const CUSTOM_TYPE = "repo-state-mini";
 const GIT_TIMEOUT = 3000;
 
 interface MiniState {
-  remote: string | null;
-  defaultBranch: string | null;
-  defaultSha: string | null;
-  defaultAhead: number | null;
-  defaultBehind: number | null;
-  branch: string | null;
-  sha: string | null;
-  commitsFromDefault: number | null;
-  version: string | null;
-  upstream: string | null;
-  ahead: number | null;
-  behind: number | null;
-  currentIsLinked: boolean;
-  worktreeCount: number;
-  primaryWorktree: string | null;
-  dirty: { modified: number; staged: number; untracked: number; deleted: number; conflicts: number } | null;
+remote: string | null;
+defaultBranch: string | null;
+defaultSha: string | null;
+defaultAhead: number | null;
+defaultBehind: number | null;
+branch: string | null;
+sha: string | null;
+commitsFromDefault: number | null;
+version: string | null;
+lastCommit: { sha: string; subject: string } | null;
+upstream: string | null;
+ahead: number | null;
+behind: number | null;
+currentIsLinked: boolean;
+worktreeCount: number;
+primaryWorktree: string | null;
+primaryState: { branch: string | null; sha: string | null; dirty: MiniDirty } | null;
+dirty: MiniDirty;
+}
+
+interface MiniDirty {
+modified: number; staged: number; untracked: number; deleted: number; conflicts: number;
+}
+
+function parseDirty(statusOut: string): MiniDirty {
+let modified = 0, staged = 0, untracked = 0, deleted = 0, conflicts = 0;
+for (const line of statusOut.split("\n")) {
+if (!line.trim()) continue;
+const x = line[0], y = line[1];
+const xy = x + y;
+if (xy === "??") { untracked++; continue; }
+if (x === "U" || y === "U" || (x === y && (x === "A" || x === "D"))) { conflicts++; continue; }
+if (x !== " " && x !== "?") {
+if (x === "D") deleted++;
+else if ("MARC".includes(x)) staged++;
+}
+if (y !== " " && y !== "?") {
+if (y === "D") deleted++;
+else if ("MARC".includes(y)) modified++;
+}
+}
+return { modified, staged, untracked, deleted, conflicts };
 }
 
 export default function gitMiniInject(pi: MinimalPi) {
   let currentTurnIndex = -1;
   let cached: { at: number; cwd: string; state: MiniState | null } | null = null;
 
-  async function git(ctx: Ctx, args: string[]): Promise<{ ok: boolean; out: string; err: string }> {
+  async function git(ctx: Ctx, args: string[], cwdOverride?: string): Promise<{ ok: boolean; out: string; err: string }> {
     try {
-      const r = await pi.exec("git", ["-C", ctx.cwd, ...args], { timeout: GIT_TIMEOUT });
+      const r = await pi.exec("git", ["-C", cwdOverride ?? ctx.cwd, ...args], { timeout: GIT_TIMEOUT });
       return { ok: r.code === 0 && !r.killed, out: r.stdout || "", err: r.stderr || "" };
     } catch (e) {
       return { ok: false, out: "", err: String((e as Error)?.message || e) };
@@ -84,22 +110,7 @@ export default function gitMiniInject(pi: MinimalPi) {
       return null;
     }
 
-    let modified = 0, staged = 0, untracked = 0, deleted = 0, conflicts = 0;
-    for (const line of status.out.split("\n")) {
-      if (!line.trim()) continue;
-      const x = line[0], y = line[1];
-      const xy = x + y;
-      if (xy === "??") { untracked++; continue; }
-      if (x === "U" || y === "U" || (x === y && (x === "A" || x === "D"))) { conflicts++; continue; }
-      if (x !== " " && x !== "?") {
-        if (x === "D") deleted++;
-        else if ("MARC".includes(x)) staged++;
-      }
-      if (y !== " " && y !== "?") {
-        if (y === "D") deleted++;
-        else if ("MARC".includes(y)) modified++;
-      }
-    }
+    const dirty = status.ok ? parseDirty(status.out) : null;
 
     let ahead: number | null = null, behind: number | null = null;
     const upstreamName = upstream.ok ? upstream.out.trim() : null;
@@ -159,17 +170,38 @@ export default function gitMiniInject(pi: MinimalPi) {
       currentIsLinked = primaryWorktree !== null && cwdNorm !== primaryWorktree.replace(/\\/g, "/").replace(/\/+$/, "");
     }
 
+    // last commit (what was done most recently)
+    let lastCommit: { sha: string; subject: string } | null = null;
+    const last = await git(ctx, ["log", "--oneline", "-1"]);
+    if (last.ok && last.out.trim()) {
+      const sp = last.out.indexOf(" ");
+      lastCommit = { sha: last.out.slice(0, sp > 0 ? sp : 7), subject: sp > 0 ? last.out.slice(sp + 1).trim().slice(0, 60) : "" };
+    }
+
+    // primary worktree state (only when multiple worktrees exist)
+    let primaryState: { branch: string | null; sha: string | null; dirty: MiniDirty } | null = null;
+    if (worktreeCount > 1 && primaryWorktree) {
+      const [pb, ps, pst] = await Promise.all([
+        git(ctx, ["rev-parse", "--abbrev-ref", "HEAD"], primaryWorktree),
+        git(ctx, ["rev-parse", "--short", "HEAD"], primaryWorktree),
+        git(ctx, ["status", "--porcelain=v1"], primaryWorktree),
+      ]);
+      primaryState = {
+        branch: pb.ok ? pb.out.trim() : null,
+        sha: ps.ok ? ps.out.trim() : null,
+        dirty: pst.ok ? parseDirty(pst.out) : { modified: -1, staged: -1, untracked: -1, deleted: -1, conflicts: -1 },
+      };
+    }
+
     const state: MiniState = {
       remote: remote.ok ? remote.out.trim().split("\n")[0] : null,
       defaultBranch, defaultSha, defaultAhead, defaultBehind,
       branch: branch.ok ? branch.out.trim() : null,
       sha: sha.ok ? sha.out.trim() : null,
-      commitsFromDefault, version,
+      commitsFromDefault, version, lastCommit,
       upstream: upstreamName, ahead, behind,
-      currentIsLinked, worktreeCount, primaryWorktree,
-      dirty: status.ok
-        ? { modified, staged, untracked, deleted, conflicts }
-        : null,
+      currentIsLinked, worktreeCount, primaryWorktree, primaryState,
+      dirty,
     };
     cached = { at: Date.now(), cwd: ctx.cwd, state };
     return state;
@@ -191,6 +223,9 @@ export default function gitMiniInject(pi: MinimalPi) {
     const upstreamPart = s.upstream ? ` · ahead${s.ahead ?? "?"}/b${s.behind ?? "?"}` : "";
     parts.push(`branch ${branchPart}${iterPart}${upstreamPart}`);
     if (s.version) parts.push(`ver ${s.version}`);
+    if (s.lastCommit) {
+      parts.push(`last ${s.lastCommit.sha} ${s.lastCommit.subject.slice(0, 44)}`);
+    }
     if (s.dirty) {
       const d = s.dirty;
       parts.push(`dirty ${d.modified}m/${d.staged}s/${d.untracked}u/${d.deleted}d${d.conflicts ? `/${d.conflicts}c` : ""}`);
@@ -198,7 +233,13 @@ export default function gitMiniInject(pi: MinimalPi) {
       parts.push("dirty ?/?/?/?");
     }
     if (s.worktreeCount > 1) {
-      parts.push(`wt ${s.currentIsLinked ? "linked" : "primary"} (${s.worktreeCount} total${s.primaryWorktree ? `, primary ${s.primaryWorktree}` : ""})`);
+      parts.push(`wt ${s.currentIsLinked ? "linked" : "primary"}: ${s.primaryWorktree ? s.primaryWorktree : s.cwd} (${s.worktreeCount} total)`);
+      if (s.primaryState) {
+        const p = s.primaryState;
+        const pd = p.dirty;
+        const dirtyStr = pd.modified < 0 ? "?/?/?/?" : `${pd.modified}m/${pd.staged}s/${pd.untracked}u/${pd.deleted}d${pd.conflicts ? `/${pd.conflicts}c` : ""}`;
+        parts.push(`primary ${p.branch ?? "?"}${p.sha ? ` (${p.sha})` : ""} dirty ${dirtyStr}`);
+      }
     }
     return `[iter] ${parts.join(" | ")}`;
   }
