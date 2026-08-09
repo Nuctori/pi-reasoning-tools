@@ -73,9 +73,11 @@ async function main() {
     if (injected.length === 1) {
       const line = injected[0].content || "";
       console.log("  injected:", line);
-      check("line mentions branch", /\[git\]/.test(line) && /branch|dirty|ahead/.test(line), line.slice(0, 80));
+      check("line mentions iter prefix", /\[iter\]/.test(line), line.slice(0, 40));
+      // no-remote repo: graceful degradation — branch/ver/dirty still present; full fields covered by the temp-repo case below
+      check("degraded: branch|ver|dirty present", /branch/.test(line) && /dirty/.test(line), line.slice(0, 90));
       check("line is one line", !line.includes("\n"));
-      check("line is compact (<160 chars)", line.length < 160, "len=" + line.length);
+      check("density bound (<300 chars)", line.length < 300, "len=" + line.length);
     }
 
     // turn > 0: should NOT inject (only strip)
@@ -91,6 +93,41 @@ async function main() {
     const rOff = await ctxHandler({ messages: baseMsgs }, { cwd: REPO });
     check("off switch disables injection", rOff.messages.filter((m) => m.role === "custom").length === 0);
     if (saved === undefined) delete process.env.PI_REPO_STATE_INJECT; else process.env.PI_REPO_STATE_INJECT = saved;
+
+    // full high-density fields require a repo with remote + origin/HEAD: build one in temp
+    const os = require("node:os");
+    const fs = require("node:fs");
+    function gitIn(cwd, ...args) {
+      try {
+        const stdout = execFileSync("git", ["-C", cwd, ...args], { encoding: "utf-8", timeout: 8000, stdio: ["ignore", "pipe", "pipe"] });
+        return { ok: true, stdout };
+      } catch (e) {
+        return { ok: false, stdout: e.stdout || "" };
+      }
+    }
+    const tdir = fs.mkdtempSync(path.join(os.tmpdir(), "rs-inject-full-"));
+    gitIn(tdir, "init", "-q");
+    gitIn(tdir, "config", "user.name", "t"); gitIn(tdir, "config", "user.email", "t@t");
+    fs.writeFileSync(path.join(tdir, "a.txt"), "base\n");
+    gitIn(tdir, "add", "a.txt"); gitIn(tdir, "commit", "-qm", "base");
+    const baseSha = (gitIn(tdir, "rev-parse", "HEAD").stdout || "").trim();
+    gitIn(tdir, "remote", "add", "origin", "https://github.com/example/repo.git");
+    gitIn(tdir, "update-ref", "refs/remotes/origin/master", baseSha);
+    gitIn(tdir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/master");
+    gitIn(tdir, "checkout", "-qb", "feature");
+    fs.writeFileSync(path.join(tdir, "b.txt"), "1\n"); gitIn(tdir, "add", "b.txt"); gitIn(tdir, "commit", "-qm", "one");
+    fs.writeFileSync(path.join(tdir, "c.txt"), "2\n"); gitIn(tdir, "add", "c.txt"); gitIn(tdir, "commit", "-qm", "two");
+
+    sessionStart?.({}, {});
+    turnStart?.({ turnIndex: 0 }, {});
+    const rFull = await ctxHandler({ messages: [{ role: "system", content: "s" }] }, { cwd: tdir });
+    const fullLine = (rFull.messages.find((m) => m.role === "custom" && m.customType === "repo-state-mini") || {}).content || "";
+    console.log("  full-inject:", fullLine);
+    check("full: remote present", /remote github\.com\/example\/repo/.test(fullLine), fullLine.slice(0, 80));
+    check("full: default branch + ahead/b", /default master \([0-9a-f]{7}\) ahead\d+\/b\d+/.test(fullLine));
+    check("full: +N from default", /\+2 from master/.test(fullLine), "+2 from master");
+    check("full: single line high density", !fullLine.includes("\n") && fullLine.length < 300, "len=" + fullLine.length);
+    fs.rmSync(tdir, { recursive: true, force: true });
   }
 
   console.log(`\n=== ${failures === 0 ? "ALL PASS" : failures + " FAILURES"} ===`);
