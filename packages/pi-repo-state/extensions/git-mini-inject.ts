@@ -34,6 +34,7 @@ const CUSTOM_TYPE = "repo-state-mini";
 const GIT_TIMEOUT = 3000;
 
 interface MiniState {
+cwd: string;
 remote: string | null;
 defaultBranch: string | null;
 defaultSha: string | null;
@@ -194,6 +195,7 @@ export default function gitMiniInject(pi: MinimalPi) {
     }
 
     const state: MiniState = {
+      cwd: ctx.cwd,
       remote: remote.ok ? remote.out.trim().split("\n")[0] : null,
       defaultBranch, defaultSha, defaultAhead, defaultBehind,
       branch: branch.ok ? branch.out.trim() : null,
@@ -233,7 +235,8 @@ export default function gitMiniInject(pi: MinimalPi) {
       parts.push("dirty ?/?/?/?");
     }
     if (s.worktreeCount > 1) {
-      parts.push(`wt ${s.currentIsLinked ? "linked" : "primary"}: ${s.primaryWorktree ? s.primaryWorktree : s.cwd} (${s.worktreeCount} total)`);
+      // current worktree path = cwd (not primary); primary shown separately below
+      parts.push(`wt ${s.currentIsLinked ? "linked" : "primary"}: ${s.cwd} (${s.worktreeCount} total)`);
       if (s.primaryState) {
         const p = s.primaryState;
         const pd = p.dirty;

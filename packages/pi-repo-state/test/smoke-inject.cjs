@@ -146,6 +146,7 @@ async function main() {
     const wtLine = (rWt.messages.find((m) => m.role === "custom" && m.customType === "repo-state-mini") || {}).content || "";
     console.log("  wt-inject:", wtLine);
     check("wt: current linked", /wt linked/.test(wtLine), wtLine.slice(0, 80));
+    check("wt: path not undefined", !/wt linked: undefined/.test(wtLine) && /wt linked: \S+/.test(wtLine), wtLine.match(/wt linked[^|]*/)?.[0] || "");
     check("wt: primary state present", /primary .+ dirty \d+m\//.test(wtLine), "primary dirty");
     check("wt: 2 total", /\(2 total\)/.test(wtLine));
     fs.rmSync(wt2, { recursive: true, force: true });
