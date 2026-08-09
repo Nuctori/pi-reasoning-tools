@@ -53,8 +53,23 @@ remote: cnb.cool/.../koishiNavigationEvo
 ## Test
 
 ```bash
-npm install && node test/smoke-test.cjs
+npm install && node test/smoke-test.cjs && node test/smoke-inject.cjs
 ```
+
+## Optional: minimal turn-0 injection
+
+`extensions/git-mini-inject.ts` (same package) injects a **one-line** git snapshot
+(`[git] branch (sha) · dirty 5m/0s/3u/0d · ahead 1/behind 0`) at **turn 0 only**
+(the first LLM call of each user request), appended at the end of the message
+array. Turns > 0 strip it; use `repo_state` for fresh detail mid-turn. Opt out
+with `PI_REPO_STATE_INJECT=off`.
+
+Cache trade-off (measured): across requests the injection adds only a ~100-token
+tail suffix (prefix cache preserved); within a request, the turn0→turn1 boundary
+re-processes the first assistant response once per tool-loop request (bounded,
+vs pi-git-context which broke the prefix on every snapshot change). If `git
+status` times out (>3s) the line shows `dirty ?/?/?/?` rather than claiming
+clean.
 
 ## License
 
