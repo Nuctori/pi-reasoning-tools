@@ -1,0 +1,27 @@
+name: test
+
+on:
+  push:
+    paths:
+      - 'packages/**'
+      - 'package.json'
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      # each package runs its own smoke tests (extension loads + git behaviors)
+      - run: node packages/pi-env-probe/test/smoke-test.cjs
+      - run: node packages/pi-code-intel-guide/test/smoke-test.cjs
+      - run: node packages/pi-repo-state/test/smoke-test.cjs
+      - run: node packages/pi-repo-state/test/smoke-inject.cjs

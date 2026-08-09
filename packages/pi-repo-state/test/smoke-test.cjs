@@ -88,6 +88,58 @@ async function main() {
     const res2 = await tool.execute("t", {}, undefined, undefined, { cwd: path.parse(ROOT).root });
     const text2 = (res2.content || []).map((c) => c.text || "").join("\n");
     check("non-repo returns clear verdict", /not a git repository/.test(text2), text2.slice(0, 60));
+
+    // ---- scenario repos (temp) ----
+    const os = require("node:os");
+    const fs = require("node:fs");
+    function gitIn(cwd, ...args) {
+      try {
+        const stdout = execFileSync("git", ["-C", cwd, ...args], { encoding: "utf-8", timeout: 8000, stdio: ["ignore", "pipe", "pipe"] });
+        return { ok: true, stdout };
+      } catch (e) {
+        return { ok: false, stdout: e.stdout || "" };
+      }
+    }
+
+    // conflict repo: UU
+    const cdir = fs.mkdtempSync(path.join(os.tmpdir(), "rs-conflict-"));
+    gitIn(cdir, "init", "-q");
+    gitIn(cdir, "config", "user.name", "t"); gitIn(cdir, "config", "user.email", "t@t");
+    fs.writeFileSync(path.join(cdir, "a.txt"), "base\n");
+    gitIn(cdir, "add", "a.txt"); gitIn(cdir, "commit", "-qm", "base");
+    gitIn(cdir, "checkout", "-qb", "other");
+    fs.writeFileSync(path.join(cdir, "a.txt"), "other\n");
+    gitIn(cdir, "commit", "-qam", "other");
+    gitIn(cdir, "checkout", "-q", "master");
+    fs.writeFileSync(path.join(cdir, "a.txt"), "master\n");
+    gitIn(cdir, "commit", "-qam", "master");
+    const mergeP = gitIn(cdir, "merge", "other");
+    check("conflict repo created", !mergeP.ok);
+    const rc = await tool.execute("t", { force: true }, undefined, undefined, { cwd: cdir });
+    const rct = (rc.content || []).map((c) => c.text || "").join("\n");
+    check("conflict counted", /1 CONFLICTS/.test(rct), rct.match(/dirty[^\n]*/)?.toString() || rct.slice(0, 60));
+    fs.rmSync(cdir, { recursive: true, force: true });
+
+    // unborn repo (empty, no commits): branch must resolve via symbolic-ref, not '?'
+    const udir = fs.mkdtempSync(path.join(os.tmpdir(), "rs-unborn-"));
+    gitIn(udir, "init", "-q");
+    gitIn(udir, "config", "user.name", "t"); gitIn(udir, "config", "user.email", "t@t");
+    const ures = await tool.execute("t", { force: true }, undefined, undefined, { cwd: udir });
+    const ut = (ures.content || []).map((c) => c.text || "").join("\n");
+    check("unborn repo resolves branch", /branch: master/.test(ut), ut.split("\n")[1] || ut.slice(0, 60));
+    fs.rmSync(udir, { recursive: true, force: true });
+
+    // detached HEAD
+    const ddir = fs.mkdtempSync(path.join(os.tmpdir(), "rs-detach-"));
+    gitIn(ddir, "init", "-q");
+    gitIn(ddir, "config", "user.name", "t"); gitIn(ddir, "config", "user.email", "t@t");
+    fs.writeFileSync(path.join(ddir, "a.txt"), "x\n");
+    gitIn(ddir, "add", "a.txt"); gitIn(ddir, "commit", "-qm", "one");
+    gitIn(ddir, "checkout", "-q", "--detach");
+    const dres = await tool.execute("t", { force: true }, undefined, undefined, { cwd: ddir });
+    const dt = (dres.content || []).map((c) => c.text || "").join("\n");
+    check("detached HEAD annotated", /detached/.test(dt), dt.split("\n")[1] || dt.slice(0, 60));
+    fs.rmSync(ddir, { recursive: true, force: true });
   }
 
   console.log(`\n=== ${failures === 0 ? "ALL PASS" : failures + " FAILURES"} ===`);

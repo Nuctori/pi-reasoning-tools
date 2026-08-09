@@ -1,9 +1,18 @@
 {
   "name": "pi-repo-state",
   "version": "0.1.0",
-  "description": "Lightweight on-demand git repository snapshot for pi agents: one call returns branch/ahead-behind/dirty counts/diff stats/conflicts/recent commits, directly spawning git (no shell wrapping, no per-prompt injection, no TUI — avoids the stale-context crash and cache-prefix breakage found in pi-git-context).",
+  "description": "Lightweight on-demand git repository snapshot for pi agents: one call returns branch/ahead-behind/dirty counts/diff stats/conflicts/recent commits, directly spawning git (no shell wrapping, no per-prompt injection, no TUI — avoids the stale-context crash and cache-prefix breakage found in pi-git-context). Optional turn-0 one-line injection (git-mini-inject).",
   "keywords": ["pi-package", "git", "repo-state", "repository", "snapshot", "efficiency"],
   "license": "MIT",
+  "author": "Nuctori <nuctori@local>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Nuctori/pi-reasoning-tools.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Nuctori/pi-reasoning-tools/issues"
+  },
+  "homepage": "https://github.com/Nuctori/pi-reasoning-tools#readme",
   "pi": {
     "extensions": ["./extensions"]
   },
