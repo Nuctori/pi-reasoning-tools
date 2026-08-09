@@ -75,7 +75,7 @@
 - ✅ `packages/pi-code-intel-guide` v0.1.0 — 已本地安装，14 项断言通过
 - ✅ **已装社区包（2026-08 审计后）**：`pi-verify`（验证闭环）、`pi-git-context`（git 状态注入）、`pi-read-many`（批量读取）
 - ✅ **`session-doctor` skill**（`~/.agents/skills/session-doctor/`）——分析流水线产品化：随时诊断会话成本、推荐选型；效果对比用后续会话数据重跑分析
-- ✅ **`pi-repo-state` v0.1.0（自研，已生产就绪）**：按需 `repo_state` 工具（15 断言含冲突/unborn/detached）+ `git-mini-inject` turn-0 一行注入（8 断言）+ CI + 完整 package.json。替代 pi-git-context（已对其报 bug #3）。**P2 待 v1.1**：default branch 对比(+N from master)、worktree 明细、turn_start 形状断言、signal 转发。
+- ✅ **`pi-repo-state` v0.1.0（自研，已生产就绪）**：按需 `repo_state` 工具（15 断言含冲突/unborn/detached）+ `git-mini-inject` turn-0 高密度 [iter] 快照（17 断言：remote/default+ahead-b/+N from default/ver/last commit/wt 拓扑/primary 状态）+ CI + 完整 package.json。替代 pi-git-context（已对其报 bug #3）。**已发布 npm + GitHub**（Nuctori/pi-reasoning-tools），本地已切 npm 源。**P2 待 v1.1**：worktree 明细、turn_start 形状断言、signal 转发。
 - 🔴 未装（审计后判定）：`pi-read-before-write`（作者自嘲 slop）、`pi-env-probe` 社区版（撞名）、`pi-hypa`（重写风险）、`pi-green-loop`（与 pi-verify 重叠）
 
 ## 5. 下一步（建议顺序）
