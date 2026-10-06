@@ -18,8 +18,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-          cache: npm
-      - run: npm ci
+      # 零依赖 monorepo(有意不提交 lockfile):无 npm ci/cache 必要,直接跑各包冒烟
       # each package runs its own smoke tests (extension loads + git behaviors)
       - run: node packages/pi-env-probe/test/smoke-test.cjs
       - run: node packages/pi-code-intel-guide/test/smoke-test.cjs
