@@ -18,7 +18,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      # 零依赖 monorepo(有意不提交 lockfile):无 npm ci/cache 必要,直接跑各包冒烟
+      # 各包只装 devDependencies(jiti 等 TS 加载器);仓库有意不提交 lockfile
+      # (.gitignore),npm ci 与 setup-node 的 cache: npm 均不可用,用 npm install
+      - run: npm install --no-audit --no-fund
       # each package runs its own smoke tests (extension loads + git behaviors)
       - run: node packages/pi-env-probe/test/smoke-test.cjs
       - run: node packages/pi-code-intel-guide/test/smoke-test.cjs
